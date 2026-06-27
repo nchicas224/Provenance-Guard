@@ -2,9 +2,9 @@
 
 ## Revision Status
 
-Revision 2 is in progress. We have revised through the Detection Signals section.
+Revision 2 is in progress. We have revised through the Uncertainty Representation section.
 
-Stop point for next session: continue with `## Uncertainty Representation`, focusing on final confidence scoring, final `low`/`medium`/`high` decision labels, signal disagreement handling, and how `ai_likelihood` differs from `confidence_score`.
+Stop point for next session: continue with `## Transparency Label Design`, focusing on the full label matrix for `likely_ai`, `likely_human`, `uncertain`, confidence levels, degraded-mode add-ons, and appeal guidance language.
 
 ## Summary
 
@@ -708,33 +708,358 @@ Rules:
 
 ## Uncertainty Representation
 
-The API returns both `ai_likelihood` and `confidence_score`.
+The API returns both `ai_likelihood` and `confidence_score` because they answer different questions.
 
-`ai_likelihood` represents the estimated direction on a 0.0-1.0 scale:
+`ai_likelihood` answers: "Which direction do the signals point?"
 
-- Closer to `1.0` means more AI-like.
-- Closer to `0.0` means more human-like.
+- `0.0` means strongly human-like.
+- `0.5` means mixed or unclear.
+- `1.0` means strongly AI-like.
 
-`confidence_score` represents how strongly the system trusts the final attribution result:
+`confidence_score` answers: "How much should the system trust the final attribution result?"
 
 - A low `ai_likelihood` can still produce a high `confidence_score` for `likely_human`.
-- A middle `ai_likelihood` should usually produce low confidence and an `uncertain` result.
+- A high `ai_likelihood` can produce a high `confidence_score` for `likely_ai`.
+- A middle `ai_likelihood` should produce low confidence and an `uncertain` result.
 
-`confidence_level` translates `confidence_score` into plain language:
+### Final Confidence Labels
 
-- `low`
-- `medium`
-- `high`
+Final confidence labels are separate from signal-local confidence labels.
 
-Initial scoring policy:
+| Confidence score range | Final label | Meaning |
+| --- | --- | --- |
+| `0.00 - 0.39` | `low` | The system does not have enough reliable evidence for a strong attribution. |
+| `0.40 - 0.74` | `medium` | The system has meaningful evidence, but the result still requires caution. |
+| `0.75 - 1.00` | `high` | The system has strong agreement and distance from the uncertainty band. |
 
-- Groq weight: `0.65`.
-- Stylometric weight: `0.35`.
-- `likely_ai`: combined AI likelihood `>= 0.70`.
-- `likely_human`: combined AI likelihood `<= 0.35`.
-- `uncertain`: anything between `0.35` and `0.70`.
-- High confidence is only available when the score is far from the uncertainty band and signals broadly agree.
-- If Groq is unavailable, stylometrics may classify, but confidence cannot exceed medium and the label must disclose degraded analysis.
+Final `confidence_level` is used in the API response and transparency label. It should not be interpreted as proof.
+
+### Signal Fusion
+
+Each completed signal contributes:
+
+- `ai_likelihood`
+- signal-local `confidence`
+- signal status
+
+Initial signal weights:
+
+| Signal | Weight |
+| --- | --- |
+| `groq_semantic` | `0.65` |
+| `stylometric` | `0.35` |
+
+Weighted `ai_likelihood`:
+
+```text
+combined_ai_likelihood =
+  (groq_ai_likelihood * 0.65) +
+  (stylometric_ai_likelihood * 0.35)
+```
+
+If one signal fails, re-normalize using only completed signals, mark the decision as degraded, and cap final confidence at `medium`.
+
+Example when Groq fails:
+
+```text
+combined_ai_likelihood = stylometric_ai_likelihood
+degraded = true
+degradation_reason = "groq_unavailable"
+max_confidence_level = "medium"
+```
+
+### Attribution Thresholds
+
+The final result is determined from `combined_ai_likelihood`.
+
+| AI likelihood range | Attribution result | Rationale |
+| --- | --- | --- |
+| `0.00 - 0.35` | `likely_human` | Evidence points more strongly toward human-written text. |
+| `0.36 - 0.69` | `uncertain` | Evidence is mixed, weak, or too close to the decision boundary. |
+| `0.70 - 1.00` | `likely_ai` | Evidence points more strongly toward AI-generated text. |
+
+The uncertainty band is intentionally wide because false positives against human creators are the highest-risk failure mode.
+
+### Confidence Score Calculation
+
+The final `confidence_score` should combine:
+
+1. Distance from the nearest attribution threshold.
+2. Agreement between signals.
+3. Signal-local confidence.
+4. Penalties for short text, degraded mode, or parsing instability.
+
+For `likely_ai`:
+
+```text
+distance_confidence = (combined_ai_likelihood - 0.70) / 0.30
+```
+
+For `likely_human`:
+
+```text
+distance_confidence = (0.35 - combined_ai_likelihood) / 0.35
+```
+
+For `uncertain`:
+
+```text
+confidence_score = min(weighted_signal_confidence, 0.39)
+confidence_level = "low"
+```
+
+An `uncertain` result means the system cannot confidently classify the text. The system may be intentionally choosing uncertainty because evidence is mixed, weak, unavailable, or too close to a decision boundary.
+
+For `likely_ai` and `likely_human`, continue:
+
+```text
+distance_confidence = clamp(distance_confidence, 0.0, 1.0)
+```
+
+Calculate weighted signal confidence:
+
+```text
+weighted_signal_confidence =
+  (groq_confidence * 0.65) +
+  (stylometric_confidence * 0.35)
+```
+
+If one signal fails, re-normalize using completed signals.
+
+Calculate signal agreement:
+
+```text
+signal_gap = abs(groq_ai_likelihood - stylometric_ai_likelihood)
+agreement_factor = 1 - signal_gap
+```
+
+If only one signal completed:
+
+```text
+agreement_factor = 0.60
+```
+
+Combine:
+
+```text
+confidence_score =
+  (distance_confidence * 0.45) +
+  (weighted_signal_confidence * 0.35) +
+  (agreement_factor * 0.20)
+```
+
+Apply caps:
+
+- If `degraded == true`, cap `confidence_score` at `0.74`.
+- If both signals failed, set `attribution_result = "uncertain"` and cap `confidence_score` at `0.39`.
+- If normalized text is under `200` characters, cap `confidence_score` at `0.39` unless both signals are high-confidence and strongly agree.
+- If signal disagreement is high, cap `confidence_score` at `0.74`.
+- If the final result is `likely_ai` and any major caution flag is present, cap `confidence_score` at `0.74`.
+
+### Caution Flags
+
+Caution flags reduce confidence because they increase false-positive risk.
+
+Initial caution flags:
+
+- `short_text`: fewer than `200` characters.
+- `very_short_text`: fewer than `80` characters.
+- `signal_disagreement`: Groq and stylometric `ai_likelihood` differ by more than `0.35`.
+- `groq_unavailable`: Groq signal failed or timed out.
+- `stylometric_unstable`: too few words or sentences for stable metrics.
+- `unsupported_structure`: text is mostly list, code, quote, lyrics-like, or otherwise structurally unusual.
+- `possible_translation_or_formal_style`: model or metadata suggests caution around translated, academic, or formal writing.
+
+### Conservative False-Positive Rule
+
+Because false positives are the highest-risk error, `likely_ai` should require more than a high `combined_ai_likelihood`.
+
+A `likely_ai` result should require:
+
+- `combined_ai_likelihood >= 0.70`
+- at least one completed signal with medium or high signal-local confidence
+- no unresolved parsing failure in the scoring path
+- transparency label that avoids accusation
+
+A `high` confidence `likely_ai` result should require:
+
+- `combined_ai_likelihood >= 0.85`
+- both signals completed
+- signal disagreement less than `0.20`
+- weighted signal confidence at least `0.75`
+- no major caution flags
+
+### Scoring Constants and Rationale
+
+The v1 scoring system uses explicit constants so the system is inspectable and easy to revise after evaluation. These numbers are project heuristics, not scientifically calibrated probabilities.
+
+#### Signal weights
+
+```text
+GROQ_WEIGHT = 0.65
+STYLOMETRIC_WEIGHT = 0.35
+```
+
+Meaning:
+
+- Groq receives more weight because it evaluates semantic and rhetorical patterns that simple heuristics cannot capture.
+- Stylometrics still receives meaningful weight because it is deterministic, auditable, and independent from the LLM.
+- The weights sum to `1.0` so the combined AI likelihood remains on a 0.0-1.0 scale.
+
+#### Attribution thresholds
+
+```text
+LIKELY_HUMAN_MAX = 0.35
+LIKELY_AI_MIN = 0.70
+UNCERTAIN_RANGE = 0.36 - 0.69
+```
+
+Meaning:
+
+- Scores at or below `0.35` become `likely_human`.
+- Scores at or above `0.70` become `likely_ai`.
+- Scores between those thresholds become `uncertain`.
+- The uncertainty band is intentionally wide to reduce false positives against human creators.
+- The AI threshold is stricter than the human threshold because incorrectly labeling human work as AI is the highest-risk error.
+
+#### Distance confidence denominators
+
+For `likely_ai`:
+
+```text
+distance_confidence = (combined_ai_likelihood - 0.70) / 0.30
+```
+
+Meaning:
+
+- `0.70` is the minimum threshold for `likely_ai`.
+- `0.30` is the remaining distance from `0.70` to the maximum possible score, `1.0`.
+- A score of `0.70` gives distance confidence `0.0`.
+- A score of `1.0` gives distance confidence `1.0`.
+
+For `likely_human`:
+
+```text
+distance_confidence = (0.35 - combined_ai_likelihood) / 0.35
+```
+
+Meaning:
+
+- `0.35` is the maximum threshold for `likely_human`.
+- The denominator `0.35` is the distance from `0.35` down to the minimum possible score, `0.0`.
+- A score of `0.35` gives distance confidence `0.0`.
+- A score of `0.0` gives distance confidence `1.0`.
+
+For `uncertain`:
+
+- `uncertain` does not use distance confidence.
+- `uncertain` means the system cannot confidently classify the text.
+- Final confidence for `uncertain` should remain in the `low` range.
+
+#### Final confidence component weights
+
+```text
+DISTANCE_CONFIDENCE_WEIGHT = 0.45
+SIGNAL_CONFIDENCE_WEIGHT = 0.35
+AGREEMENT_FACTOR_WEIGHT = 0.20
+```
+
+Meaning:
+
+- Distance from the decision boundary matters most because a result just barely over a threshold should not be treated as strong.
+- Signal-local confidence matters second because a signal may produce a directional score while still admitting weak evidence.
+- Signal agreement matters third because agreement between independent signals increases trust, but should not overpower distance or signal confidence.
+- These weights sum to `1.0`.
+
+#### Signal disagreement threshold
+
+```text
+SIGNAL_DISAGREEMENT_THRESHOLD = 0.35
+```
+
+Meaning:
+
+- If Groq and stylometrics differ by more than `0.35` on the AI-likelihood scale, the signals are considered strongly divergent.
+- Strong divergence should reduce final confidence and usually prevent high-confidence labels.
+
+#### Strong agreement threshold
+
+```text
+STRONG_AGREEMENT_MAX_GAP = 0.20
+```
+
+Meaning:
+
+- If signal AI-likelihood scores differ by less than `0.20`, they are considered broadly aligned.
+- High-confidence `likely_ai` requires this stronger agreement condition.
+
+#### Confidence caps
+
+```text
+LOW_CONFIDENCE_MAX = 0.39
+MEDIUM_CONFIDENCE_MAX = 0.74
+HIGH_CONFIDENCE_MIN = 0.75
+```
+
+Meaning:
+
+- Scores from `0.00` to `0.39` map to `low`.
+- Scores from `0.40` to `0.74` map to `medium`.
+- Scores from `0.75` to `1.00` map to `high`.
+- A degraded result is capped at `0.74`, which means it cannot be high confidence.
+- An uncertain result is capped at `0.39`, which keeps it low confidence.
+
+#### Short text thresholds
+
+```text
+VERY_SHORT_TEXT_MAX_CHARS = 80
+SHORT_TEXT_MAX_CHARS = 200
+```
+
+Meaning:
+
+- Text under `80` characters is very unlikely to contain enough evidence for reliable attribution.
+- Text under `200` characters may still be accepted, but confidence should usually stay low.
+- Short-text caps protect against overconfident labels on captions, fragments, slogans, or single-paragraph excerpts.
+
+#### Stylometric complexity normalization
+
+```text
+COMPLEXITY_NORMALIZATION_BOUND = 40
+normalized_sentence_complexity = min(raw_sentence_complexity / 40, 1.0)
+```
+
+Meaning:
+
+- `40` is a v1 heuristic that treats a weighted sentence complexity score around `40` as high complexity.
+- The `min(..., 1.0)` cap keeps unusually long or heavily punctuated sentences from producing values above `1.0`.
+- This prevents one unusually complex sentence from overpowering the rest of the stylometric signal.
+
+### Configuration Location
+
+All scoring thresholds, weights, confidence caps, text length limits, and stylometric normalization constants should live in `config.py`.
+
+This includes:
+
+- `GROQ_WEIGHT`
+- `STYLOMETRIC_WEIGHT`
+- `LIKELY_HUMAN_MAX`
+- `LIKELY_AI_MIN`
+- `LOW_CONFIDENCE_MAX`
+- `MEDIUM_CONFIDENCE_MAX`
+- `HIGH_CONFIDENCE_MIN`
+- `SIGNAL_DISAGREEMENT_THRESHOLD`
+- `STRONG_AGREEMENT_MAX_GAP`
+- `VERY_SHORT_TEXT_MAX_CHARS`
+- `SHORT_TEXT_MAX_CHARS`
+- `MAX_TEXT_CHARS`
+- `COMPLEXITY_NORMALIZATION_BOUND`
+
+Implementation rules:
+
+- Services should import named constants from `config.py`.
+- Services should not hardcode scoring numbers directly.
+- Tests should import or override config constants rather than duplicating unexplained numbers.
 
 ## Transparency Label Design
 
