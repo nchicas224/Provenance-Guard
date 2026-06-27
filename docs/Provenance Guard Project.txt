@@ -1,0 +1,61 @@
+Project: Provenance (Tracing the object back to its origin) Guard / Backend System.
+
+Description: This backend system will ingest data by connecting to creative sharing platforms, clean that data, process the data, classify the data by labels, and return the classification.
+
+Important notes:
+- A false positive classification (Human work is labeled as AI) carried a higher negative weight than a false negative (AI work is classified as human work.).
+- Transparency label must include UX decisions. Feedback will be provided by human users.
+- Rate-limiting threshold must be intentional. It is important to consider how much a user would submit work on a writing platform and compare it to what a flood attack would look like. This should be documented in the README.md.
+- Stylometrics: vocabulary diversity, sentence structure, punctuation density, average sentence complexity. We will need more information on these before implementation. We may required more during planning.
+- The reasoning and function of each classification signal, including: what property of the text it will measure, why that property differs between AI work and human work, and what it cannot capture. We should be able to describe the blind spot for the signal before solidifying it.
+- Trace the submission workflow and the appeals workflow while drawing the architecture.
+- Planning.md should, at minimum, contain reasoning for the following: Detection Signals, Uncertainty Representation, Transparency label design, Appeals workflow, and Anticipated edge cases.
+- Planning.md should also contain an AI Tool Plan section which will specify AI tool usage, through the Diligence lens of the 4D's AI fluency Framework, for each Milestone; examples: M3(submission endpoint + first signal), M4(second signal + confidence scoring), and M5(production layer).
+
+Recommend Stack:
+- API Framework: Flask
+- Detection signal 1: Groq(llama-3.3-70b-versatile) free tier
+- Detection signal 2: Stylometric heuristics, pure python.
+- Rate-limiting: Flask-limiter
+- Audit logging: SQLite
+
+Required Features:
+	- An API endpoint that accepts a piece of data for attribution analysis. The endpoint must return a structured response including the attribution result, confidence score, and the transparency label text that would be shown to the user.
+	- Two distinct classification signals, one signal is not allowed. Explanation of what each signal captures and why we chose them are to be written in the README.md and the planning.md. Signals will be: Groq (for semantics) and Stylometric heuristics (for structure).
+	- Must return a confidence score that eliminates the output of binary classifications. Must handle confidence thresholds and reason about what to do at each threshold.
+	  A quick example would be: thresholds: [{'low': 0.4}, {'medium': 0.4 - 0.8}, {'high': 0.8 - 1.0}].
+	  If confidence score falls into:
+	  low: return 'The content could not be confidently classified. Please use caution when using this content.
+	  medium: return the classification with a disclaimer.
+	  high: return the classification.
+	- Transparency label that displays the attribution result in plain language and make the confidence level meaningful to a non-technical reader.
+	- Appeals workflow that captures the creators reasoning, logs it and the original decision into a txt file for now, and updates the content's status to 'Under Review'. The re-classification workflow is outside of this scope so we can just implement up to the 'Under Review' checkpoint.
+	- Rate-limiting on the API Gateway to protect against attacks and spam, decisions must be documented in the README.md.
+	- Audit log that will log every attribution decision, confidence scores, signals used, and any appeals. A separated audit log to log http requests, and system instance processing. Must be documented in the README.md with at least three visible entries.
+
+
+Structure:
+- API Gateway
+- Data pipelines for (Starting with text first for this scope, and the rest in later scopes.):
+	- Audio
+	- Video
+	- Text
+	- Image
+- Routes:
+	- Appeals (user was misclassified as AI.)
+	- Each data type after cleaning and normalizing the data
+- Services:
+	- API Gateway
+	- Data validator
+	- Router to decide where each data type will land. When data lands, data is cleaned through data specific validator.
+	- Classifier (LLM model fine-tuned in LoRa or few-shot training through manual labeling of AI generated examples).
+	- Scorer -> scores confidence in the label classification. [AI] Maybe formatting the LLM confidence response into the response for the user? What do you think, what other options do we have?
+	- Responder -> This would format the final object and return a message to the user containing the transparent label.
+	- Appeal_handler -> Handles appeals from users who have reported being misclassified.
+
+[AI]: Let me know your thoughts, if I missed anything or if you disagree with anything. Tell me the specifics of your thought process and any tradeoffs you noticed.
+
+Project document requirements:
+- Transparency label -> README.md: The verbatim text of all three label variants (high-confidence AI, high-confidence human, uncertain) in a quoted string or markdown table.
+- Architecture Diagram -> planning.md: The ASCII or mermaid diagram of the project, under the label of ## Architecture.
+
