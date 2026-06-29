@@ -6,6 +6,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from provenance_guard.models import RequestLogRecord
+from provenance_guard.services.errors import SubmitValidationError
 
 
 class SubmitService:
@@ -111,13 +112,3 @@ class SubmitService:
 
     def _duration_ms(self, started_at):
         return int((perf_counter() - started_at) * 1000)
-
-
-class SubmitValidationError(Exception):
-    """Validation error that maps directly to an HTTP response."""
-
-    def __init__(self, code, message, status_code):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
