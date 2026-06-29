@@ -1,0 +1,1 @@
+"""Submit endpoint route."""
