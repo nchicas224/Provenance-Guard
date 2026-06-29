@@ -110,3 +110,51 @@ class AppealRecord:
     contact_email: str | None = None
     reviewer_notes: str | None = None
     resolution: str | None = None
+
+
+@dataclass
+class RequestLogRecord:
+    request_id: str
+    route: str
+    method: str
+    request_status: str
+    received_at: str
+    creator_id: str | None = None
+    content_type: str | None = None
+    status_code: int | None = None
+    error_code: str | None = None
+    completed_at: str | None = None
+    duration_ms: int | None = None
+    client_label: str | None = None
+
+
+@dataclass
+class AttributionDecisionLogRecord:
+    request_id: str
+    content_type: str
+    decision: AttributionDecision
+    transparency_label: str
+    appeal_guidance: str | None
+    created_at: str
+
+
+@dataclass
+class SignalOutputLogRecord:
+    signal_id: str
+    audit_id: str | None
+    request_id: str
+    signal: SignalOutput
+    created_at: str
+
+
+@dataclass
+class SystemEventRecord:
+    event_id: str
+    event_type: str
+    severity: str
+    message: str
+    details: dict[str, Any]
+    created_at: str
+    request_id: str | None = None
+    audit_id: str | None = None
+    creator_id: str | None = None
