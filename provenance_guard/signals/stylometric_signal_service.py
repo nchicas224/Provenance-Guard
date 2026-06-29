@@ -1,10 +1,10 @@
 """Stylometric signal service."""
 
-import re
 from statistics import variance
 
 from provenance_guard import config
 from provenance_guard.models import SignalOutput
+from provenance_guard.utils.text_analysis import split_sentences, tokenize_words
 
 
 class StylometricSignalService:
@@ -24,9 +24,9 @@ class StylometricSignalService:
 
     def analyze(self, normalized_text, text_stats, audit_context):
         try:
-            words = self._tokenize_words(normalized_text)
-            sentences = self._split_sentences(normalized_text)
-            sentence_word_counts = [len(self._tokenize_words(sentence)) for sentence in sentences]
+            words = tokenize_words(normalized_text)
+            sentences = split_sentences(normalized_text)
+            sentence_word_counts = [len(tokenize_words(sentence)) for sentence in sentences]
             complexity_scores = [
                 self._sentence_complexity(sentence) for sentence in sentences
             ]
@@ -42,7 +42,7 @@ class StylometricSignalService:
             }
 
             ai_likelihood = self._normalize_ai_likelihood(raw_output)
-            confidence = self._confidence(words, sentences, audit_context)
+            confidence = self._confidence(text_stats, audit_context)
 
             return SignalOutput(
                 name="stylometric",
@@ -68,29 +68,6 @@ class StylometricSignalService:
                 error=str(error),
             )
 
-    def _tokenize_words(self, text):
-        return re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text.lower())
-
-    def _split_sentences(self, text):
-        protected = text
-        replacements = {
-            "e.g.": "e<dot>g<dot>",
-            "i.e.": "i<dot>e<dot>",
-            "Mr.": "Mr<dot>",
-            "Mrs.": "Mrs<dot>",
-            "Ms.": "Ms<dot>",
-            "Dr.": "Dr<dot>",
-            "Prof.": "Prof<dot>",
-            "vs.": "vs<dot>",
-            "etc.": "etc<dot>",
-        }
-        for source, replacement in replacements.items():
-            protected = protected.replace(source, replacement)
-
-        protected = re.sub(r"(\d)\.(\d)", r"\1<dot>\2", protected)
-        parts = re.split(r"(?<=[.!?])\s+", protected)
-        return [part.replace("<dot>", ".").strip() for part in parts if part.strip()]
-
     def _vocabulary_diversity(self, words):
         if not words:
             return 0.0
@@ -108,7 +85,7 @@ class StylometricSignalService:
         return punctuation_count / len(text)
 
     def _sentence_complexity(self, sentence):
-        words = self._tokenize_words(sentence)
+        words = tokenize_words(sentence)
         comma_count = sentence.count(",")
         conjunction_count = sum(1 for word in words if word in self.CONJUNCTIONS)
 
@@ -157,18 +134,18 @@ class StylometricSignalService:
             config.STYLOMETRIC_MAX_AI_LIKELIHOOD,
         )
 
-    def _confidence(self, words, sentences, audit_context):
+    def _confidence(self, text_stats, audit_context):
         # Stylometric confidence starts moderate because the signal is
         # explainable but limited. It decreases when there are too few words or
         # sentences for stable metrics, especially for short submissions.
         confidence = config.STYLOMETRIC_BASE_CONFIDENCE
 
-        if len(words) < config.MIN_WORDS_FOR_STABLE_DIVERSITY:
+        if text_stats.word_count < config.MIN_WORDS_FOR_STABLE_DIVERSITY:
             confidence -= config.STYLOMETRIC_LOW_WORD_COUNT_PENALTY
             if "stylometric_unstable" not in audit_context.caution_flags:
                 audit_context.caution_flags.append("stylometric_unstable")
 
-        if len(sentences) < config.MIN_SENTENCES_FOR_STABLE_VARIANCE:
+        if text_stats.sentence_count < config.MIN_SENTENCES_FOR_STABLE_VARIANCE:
             confidence -= config.STYLOMETRIC_LOW_SENTENCE_COUNT_PENALTY
             if "stylometric_unstable" not in audit_context.caution_flags:
                 audit_context.caution_flags.append("stylometric_unstable")

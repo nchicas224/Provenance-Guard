@@ -1,6 +1,5 @@
 """Text attribution pipeline."""
 
-import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -9,9 +8,9 @@ from provenance_guard.models import (
     PipelineResult,
     SignalOutputLogRecord,
     SystemEventRecord,
-    TextStats,
 )
 from provenance_guard.services.errors import SubmitValidationError
+from provenance_guard.utils.text_analysis import build_text_stats, normalize_text
 
 
 class TextPipeline:
@@ -31,10 +30,10 @@ class TextPipeline:
 
     def run(self, pipeline_input):
         audit_context = pipeline_input.audit_context
-        normalized_text = self._normalize(pipeline_input.content)
+        normalized_text = normalize_text(pipeline_input.content)
         self._validate_normalized_text(normalized_text)
 
-        text_stats = self._build_text_stats(pipeline_input.content, normalized_text)
+        text_stats = build_text_stats(pipeline_input.content, normalized_text)
         self._add_text_caution_flags(audit_context, text_stats)
 
         signals = [
@@ -77,9 +76,6 @@ class TextPipeline:
             decision=decision,
         )
 
-    def _normalize(self, text):
-        return re.sub(r"\s+", " ", text.strip())
-
     def _validate_normalized_text(self, normalized_text):
         if not normalized_text:
             raise SubmitValidationError(
@@ -94,49 +90,6 @@ class TextPipeline:
                 message=f"text submissions must be {config.MAX_TEXT_CHARS} characters or fewer.",
                 status_code=413,
             )
-
-    def _build_text_stats(self, original_text, normalized_text):
-        words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", normalized_text)
-        sentences = self._simple_sentence_split(normalized_text)
-        word_count = len(words)
-        estimated_reading_seconds = (
-            int((word_count / config.READING_WORDS_PER_MINUTE) * 60)
-            if word_count
-            else 0
-        )
-
-        return TextStats(
-            character_count=len(original_text),
-            word_count=word_count,
-            sentence_count=len(sentences),
-            estimated_reading_seconds=estimated_reading_seconds,
-            normalized_character_count=len(normalized_text),
-        )
-
-    def _simple_sentence_split(self, text):
-        protected = text
-        replacements = {
-            "e.g.": "e<dot>g<dot>",
-            "i.e.": "i<dot>e<dot>",
-            "Mr.": "Mr<dot>",
-            "Mrs.": "Mrs<dot>",
-            "Ms.": "Ms<dot>",
-            "Dr.": "Dr<dot>",
-            "Prof.": "Prof<dot>",
-            "vs.": "vs<dot>",
-            "etc.": "etc<dot>",
-        }
-        for source, replacement in replacements.items():
-            protected = protected.replace(source, replacement)
-
-        protected = re.sub(r"(\d)\.(\d)", r"\1<dot>\2", protected)
-        parts = re.split(r"(?<=[.!?])\s+", protected)
-        sentences = []
-        for part in parts:
-            restored = part.replace("<dot>", ".").strip()
-            if restored:
-                sentences.append(restored)
-        return sentences
 
     def _add_text_caution_flags(self, audit_context, text_stats):
         if text_stats.normalized_character_count < config.VERY_SHORT_TEXT_MAX_CHARS:
