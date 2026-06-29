@@ -99,7 +99,11 @@ class TextPipeline:
         words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", normalized_text)
         sentences = self._simple_sentence_split(normalized_text)
         word_count = len(words)
-        estimated_reading_seconds = int((word_count / 200) * 60) if word_count else 0
+        estimated_reading_seconds = (
+            int((word_count / config.READING_WORDS_PER_MINUTE) * 60)
+            if word_count
+            else 0
+        )
 
         return TextStats(
             character_count=len(original_text),
