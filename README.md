@@ -324,6 +324,31 @@ each case can be run through the Flask API and recorded in this report with the
 actual `attribution_result`, `ai_likelihood`, `confidence_score`,
 `confidence_level`, `transparency_label`, and `audit_id`.
 
+Manual evaluation results:
+
+| Example ID | Expected bucket | Actual result | AI likelihood | Confidence | Level | Degraded |
+| --- | --- | --- | --- | --- | --- | --- |
+| `human_informal_001` | `likely_human` | `likely_human` | `0.3085` | `0.4180` | `medium` | `false` |
+| `human_informal_002` | `likely_human` | `likely_human` | `0.2770` | `0.4537` | `medium` | `false` |
+| `human_formal_001` | `likely_human` | `uncertain` | `0.3365` | `0.3432` | `low` | `false` |
+| `human_dialogue_001` | `likely_human` | `likely_human` | `0.2945` | `0.4212` | `medium` | `false` |
+| `ai_generic_001` | `likely_ai` | `uncertain` | `0.6020` | `0.3900` | `low` | `false` |
+| `ai_generic_002` | `likely_ai` | `uncertain` | `0.5685` | `0.3900` | `low` | `false` |
+| `ai_generic_003` | `likely_ai` | `uncertain` | `0.6160` | `0.3900` | `low` | `false` |
+| `ai_generic_004` | `likely_ai` | `uncertain` | `0.6335` | `0.3900` | `low` | `false` |
+| `ambiguous_short_001` | `uncertain` | `uncertain` | `0.4665` | `0.2475` | `low` | `false` |
+| `ambiguous_list_001` | `uncertain` | `uncertain` | `0.4665` | `0.3900` | `low` | `false` |
+| `ambiguous_template_001` | `uncertain` | `uncertain` | `0.5650` | `0.3900` | `low` | `false` |
+| `ambiguous_prompt_injection_001` | `uncertain` | `uncertain` | `0.4615` | `0.2175` | `low` | `false` |
+
+Evaluation summary:
+
+- Human-like informal and dialogue-heavy examples were usually labeled `likely_human` with medium confidence.
+- The formal human-written example was routed to `uncertain`, which matches the safety goal of treating polished or formal writing cautiously.
+- All four generic AI-like examples were routed to `uncertain` instead of `likely_ai`. This shows the v1 system is conservative but under-sensitive for AI-like generic prose.
+- Ambiguous, short, list-like, template-like, and prompt-injection-like examples were all routed to `uncertain`, which matches the intended safety behavior.
+- No manual evaluation case degraded, which confirms that both Groq semantic analysis and stylometric analysis completed during the run.
+
 Current automated verification:
 
 ```text
