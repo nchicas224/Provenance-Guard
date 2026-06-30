@@ -203,6 +203,15 @@ Confidence labels:
 
 The uncertainty band is intentionally wide because false positives against human creators are the highest-risk failure mode.
 
+Example confidence variation from manual evaluation:
+
+| Example | Result | AI likelihood | Confidence score | Confidence level | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `human_informal_002` | `likely_human` | `0.2770` | `0.4537` | `medium` | Informal, specific writing produced a human-leaning result with moderate confidence. |
+| `ambiguous_prompt_injection_001` | `uncertain` | `0.4615` | `0.2175` | `low` | Prompt-injection-like text and weak signal confidence produced a low-confidence uncertain result. |
+
+The v1 label matrix supports high-confidence labels, but the manual evaluation set did not produce a high-confidence result. This is consistent with the intentionally conservative scoring design and is documented as a calibration limitation rather than hidden.
+
 ## Transparency Labels
 
 | Attribution result | Confidence level | Label text |
@@ -246,6 +255,35 @@ Rate-limited response:
   }
 }
 ```
+
+Rate-limit test command:
+
+```bash
+for i in $(seq 1 12); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5000/api/v1/submit \
+    -H "Content-Type: application/json" \
+    -d '{"creator_id": "ratelimit-test", "content_type": "text", "content": "This is a test submission for rate limit testing purposes only.", "metadata": {"platform": "rate_limit_test"}}'
+done
+```
+
+Observed rate-limit evidence:
+
+```text
+200
+200
+200
+200
+200
+200
+200
+200
+200
+200
+429
+429
+```
+
+The first 10 requests were accepted, then requests 11 and 12 were blocked by the `10 per minute` submit limit.
 
 v1 rate limiting is educational and not production-grade authentication. A production system should use authenticated identity, API keys, gateway enforcement, and persistent rate-limit storage.
 
@@ -299,6 +337,72 @@ Example appeal:
   "reason": "This is my original work and I can provide drafts."
 }
 ```
+
+Structured audit evidence:
+
+```text
+[created_at: 2026-06-30T18:02:13.854544+00:00]
+[audit_id: audit_b461d633a5ef43c68f05663524c79990]
+[request_id: req_d368d179c4834e5d9fbb401eceacf2ed]
+[creator_id: ratelimit-test]
+[content_type: text]
+[attribution_result: uncertain]
+[final_ai_likelihood: 0.5315]
+[confidence_score: 0.1475]
+[confidence_level: low]
+[degraded: 0]
+[groq_ai_likelihood: 0.5]
+[groq_confidence: 0.2]
+[stylometric_ai_likelihood: 0.59]
+[stylometric_confidence: 0.05]
+[appeal_status: under_review]
+
+[created_at: 2026-06-30T18:02:12.901336+00:00]
+[audit_id: audit_d51b586c8dec4355a7bf2b5ba3f490b0]
+[request_id: req_39216f18a0654d39b65d84232221b331]
+[creator_id: ratelimit-test]
+[content_type: text]
+[attribution_result: uncertain]
+[final_ai_likelihood: 0.5315]
+[confidence_score: 0.1475]
+[confidence_level: low]
+[degraded: 0]
+[groq_ai_likelihood: 0.5]
+[groq_confidence: 0.2]
+[stylometric_ai_likelihood: 0.59]
+[stylometric_confidence: 0.05]
+[appeal_status: no_appeal]
+
+[created_at: 2026-06-30T18:02:11.991446+00:00]
+[audit_id: audit_2a4ab96f69394e7ca1afee26f648cf44]
+[request_id: req_325da6b4d69d4088920d9c7985d02d92]
+[creator_id: ratelimit-test]
+[content_type: text]
+[attribution_result: uncertain]
+[final_ai_likelihood: 0.5315]
+[confidence_score: 0.1475]
+[confidence_level: low]
+[degraded: 0]
+[groq_ai_likelihood: 0.5]
+[groq_confidence: 0.2]
+[stylometric_ai_likelihood: 0.59]
+[stylometric_confidence: 0.05]
+[appeal_status: no_appeal]
+```
+
+Appeal response evidence:
+
+```json
+{
+  "appeal_id": "appeal_34057fe7a2c44078a29efae6ec12f5f6",
+  "audit_id": "audit_b461d633a5ef43c68f05663524c79990",
+  "created_at": "2026-06-30T22:39:39.466388+00:00",
+  "creator_id": "ratelimit-test",
+  "status": "under_review"
+}
+```
+
+This evidence shows the audit log stores timestamps, durable IDs, creator IDs, final attribution decisions, confidence scores, individual Groq and stylometric scores, and appeal linkage.
 
 ## Evaluation Report
 
@@ -357,6 +461,26 @@ Current automated verification:
 
 The test suite covers request validation, stylometric scoring, confidence scoring, submit API behavior, health checks, and appeals. Groq is mocked in tests so automated results do not depend on network access, free-tier rate limits, or model output drift.
 
+## Known Limitations
+
+- Generic AI-like prose was under-detected in manual testing. All four expected `likely_ai` examples returned `uncertain` because Groq produced moderate scores and stylometrics remained bounded, keeping the combined score below the `likely_ai` threshold.
+- Short, list-like, template-like, formal, edited, translated, or highly polished human writing can look structurally AI-like. The system reduces confidence in these cases, but that also means some genuinely AI-generated text may remain inconclusive.
+- Rate limiting uses a client-provided `creator_id` when present and falls back to IP address. In production, creator identity should come from authentication, and limiter state should be stored in Redis or another shared backend.
+- SQLite is appropriate for this MVP, but a production audit trail would need stronger access controls, retention policy, migration management, and reviewer tooling.
+- The system does not make final enforcement decisions. It produces advisory labels and accepts appeals, but human review is outside v1 scope.
+
+## Spec Reflection
+
+The project spec helped guide the implementation toward production-shaped safety features instead of a simple classifier. The final design includes transparency labels, a submit API, rate limiting, structured audit logs, signal-level outputs, and an appeals workflow because those requirements were treated as first-class system behaviors.
+
+The implementation diverged from a minimal `/submit` endpoint by using `/api/v1/submit`. This made the route more canonical for a versioned API gateway and left room for future content types. The audit log also uses SQLite instead of a plain text log so requests, signal outputs, final decisions, system events, and appeals can be queried and linked by `audit_id` and `creator_id`.
+
+## AI Usage
+
+- I used AI assistance to plan the architecture from the project notes. The AI helped draft the original module breakdown, data flow, API contracts, and evaluation plan. I revised the design decisions during planning, including using `/api/v1/submit`, storing audit logs in SQLite, adding `creator_id` to audit records, and keeping the system conservative around authorship claims.
+- I used AI assistance while implementing and explaining the scoring system. The AI helped draft comments and tests for the confidence scorer, stylometric heuristics, and Groq response parser. I questioned and revised heuristic explanations, moved shared text analysis into utilities, and kept the comments focused on why each value exists rather than only what the code does.
+- I used AI assistance to prepare evaluation evidence and README language. The AI helped structure manual evaluation examples and summarize results, but I supplied the actual API outputs, rate-limit evidence, audit rows, and appeal response used in this report.
+
 ## Safety Boundaries
 
 - The system is advisory.
@@ -365,3 +489,35 @@ The test suite covers request validation, stylometric scoring, confidence scorin
 - Low-confidence non-uncertain results collapse to `uncertain`.
 - Appeals are accepted into `under_review`; final human review is outside v1 scope.
 - Final attribution decisions should not be returned unless audit logging succeeds.
+
+## Demo Walkthrough Script
+
+```text
+Hi, I'm Arman, and this is Provenance Guard.
+
+Provenance Guard is an advisory attribution backend for creative text submissions. The goal is not to prove whether something was written by a human or generated by AI, because text alone cannot prove authorship. Instead, the system combines multiple signals, represents uncertainty clearly, logs decisions for auditability, and gives creators an appeals path.
+
+I'll start by showing the API through the Gradio interface. This UI is a small frontend over the Flask API. I can paste in a text submission, provide a creator ID, and submit it to the backend. The response gives me a user-facing label, plus the raw JSON response underneath.
+
+The main endpoint is POST /api/v1/submit. That request goes through the Flask app, which acts as the API gateway. The gateway handles routing, rate limiting, validation, and then sends supported text submissions into the text pipeline.
+
+Inside the pipeline, I use two signals. The first is a Groq semantic signal, which asks an LLM to evaluate rhetorical and presentation-level patterns. The second is a deterministic stylometric signal, which looks at vocabulary diversity, sentence length variance, punctuation density, and sentence complexity. These two signals are combined into a final AI likelihood score and a confidence score.
+
+One important design decision is that the system is intentionally conservative. If the signals are mixed, the text is short, or confidence is low, the result becomes uncertain instead of making a strong claim. This is especially important because a false accusation against a human creator is the highest-risk failure mode.
+
+Here is an example response. The UI shows the result, confidence level, AI likelihood, whether the analysis degraded, and the audit ID. The raw JSON includes both individual signal scores, the final attribution result, the transparency label, and appeal guidance if the result is likely AI.
+
+The transparency labels are designed for users, not just developers. A likely-human label explains that the text shows patterns consistent with human writing, but it is not proof. A likely-AI label says the text shows patterns consistent with AI generation, but it still needs context. An uncertain label says the system could not confidently attribute the text.
+
+The project also includes an appeals workflow. If a creator receives a likely-AI result, the response includes guidance telling them to appeal using the audit ID. The appeal endpoint links the appeal back to the original audit record and creator ID, and stores the appeal as under review.
+
+For auditability, the backend writes structured records to SQLite. It logs request records, signal outputs, final attribution decisions, appeals, and system events. This means I can trace a decision from the original request, to the individual signal scores, to the final confidence score, and then to any appeal that was filed.
+
+The system also includes rate limiting through Flask-Limiter. The submit endpoint is limited to 10 submissions per minute and 100 per day per client. In this MVP, the limiter keys off creator ID when available and falls back to IP address. In production, I would not trust a client-submitted creator ID; I would derive identity from authentication and store rate-limit counters in Redis.
+
+For evaluation, I created a manual fixture set with human-like, AI-like, and ambiguous examples. The system handled informal human writing and ambiguous writing well, but the generic AI-like examples mostly came back uncertain. That is an important limitation: the v1 system is cautious, but under-sensitive for generic AI-style prose. I documented that because the goal is not to overstate detector accuracy.
+
+If I were deploying this for real, I would add authenticated users, persistent rate-limit storage, more calibrated evaluation data, reviewer tooling for appeals, and stronger audit reporting around content IDs and decision history.
+
+Overall, this project helped me practice API gateway design, data pipeline orchestration, structured audit logging, AI safety guardrails, confidence scoring, and responsible evaluation of an AI-assisted system.
+```
