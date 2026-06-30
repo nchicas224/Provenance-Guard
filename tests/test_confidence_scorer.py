@@ -56,6 +56,8 @@ def test_uncertain_result_stays_low_confidence():
     )
 
     assert decision.attribution_result == "uncertain"
+    assert round(decision.ai_likelihood, 4) == 0.5475
+    assert round(decision.confidence_score, 4) == 0.39
     assert decision.confidence_level == "low"
 
 
@@ -75,6 +77,8 @@ def test_short_text_caps_likely_ai_to_medium_when_signals_are_strong():
 
     assert decision.confidence_level == "medium"
     assert decision.attribution_result == "likely_ai"
+    assert round(decision.ai_likelihood, 4) == 0.8975
+    assert round(decision.confidence_score, 4) == 0.74
 
 
 def test_failed_groq_caps_confidence_at_medium():
@@ -98,4 +102,6 @@ def test_failed_groq_caps_confidence_at_medium():
     )
 
     assert decision.degraded is True
+    assert round(decision.ai_likelihood, 4) == 0.80
+    assert round(decision.confidence_score, 4) == 0.6025
     assert decision.confidence_level != "high"

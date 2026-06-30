@@ -1,5 +1,7 @@
 """Shared pytest fixtures for Provenance Guard tests."""
 
+from pathlib import Path
+
 import pytest
 
 from provenance_guard.app import create_app
@@ -7,14 +9,19 @@ from provenance_guard.models import SignalOutput
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(monkeypatch, request):
     """Create a test app with an isolated SQLite database.
 
     Expected: tests can exercise the real Flask routes without touching the
     developer database. Unexpected: tests leaking audit rows across cases.
     """
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    app = create_app(database_path=tmp_path / "test.db")
+
+    artifact_dir = Path(".pytest_artifacts")
+    artifact_dir.mkdir(exist_ok=True)
+    database_path = artifact_dir / f"{request.node.name}.db"
+
+    app = create_app(database_path=database_path)
     app.config.update(TESTING=True)
     return app
 
