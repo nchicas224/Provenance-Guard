@@ -5,7 +5,6 @@ import sqlite3
 from provenance_guard.services.audit_logger import AuditLogger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-print(PROJECT_ROOT)
 DATABASE_PATH = PROJECT_ROOT / "provenance_guard.db"
 
 def get_audit_summary_rows() -> list[dict[str, Any]]:
