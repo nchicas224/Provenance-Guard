@@ -317,10 +317,17 @@ Minimum evaluation set:
 | Groq unavailable | Should degrade gracefully and cap confidence. | result, degraded flag, label, audit_id |
 | Appeal after likely_ai | Should create under_review appeal linked to creator_id and audit_id. | appeal_id, status, audit_id |
 
+The manual evaluation fixture lives at `docs/evaluation_examples.json`. It
+contains 12 examples across expected `likely_human`, `likely_ai`, and
+`uncertain` buckets. The Gradio UI loads these examples into the Submit tab so
+each case can be run through the Flask API and recorded in this report with the
+actual `attribution_result`, `ai_likelihood`, `confidence_score`,
+`confidence_level`, `transparency_label`, and `audit_id`.
+
 Current automated verification:
 
 ```text
-12 tests passed
+16 tests passed
 ```
 
 The test suite covers request validation, stylometric scoring, confidence scoring, submit API behavior, health checks, and appeals. Groq is mocked in tests so automated results do not depend on network access, free-tier rate limits, or model output drift.

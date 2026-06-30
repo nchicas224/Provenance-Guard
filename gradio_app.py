@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -9,6 +10,26 @@ import gradio as gr
 
 
 API_BASE_URL = os.getenv("PROVENANCE_API_BASE_URL", "http://127.0.0.1:5000")
+EVALUATION_EXAMPLES_PATH = Path(__file__).parent / "docs" / "evaluation_examples.json"
+
+
+def load_evaluation_examples():
+    if not EVALUATION_EXAMPLES_PATH.exists():
+        return []
+
+    with EVALUATION_EXAMPLES_PATH.open(encoding="utf-8") as examples_file:
+        examples = json.load(examples_file)
+
+    return [
+        [
+            "user_123",
+            example["content"],
+            "manual_eval",
+            example["id"],
+            f"{example['expected_bucket']}: {example['title']}",
+        ]
+        for example in examples
+    ]
 
 
 def submit_text(creator_id, content, platform, submission_id, title):
@@ -96,6 +117,10 @@ with gr.Blocks(title="Provenance Guard") as demo:
             submit_text,
             inputs=[creator_id, content, platform, submission_id, title],
             outputs=submit_output,
+        )
+        gr.Examples(
+            examples=load_evaluation_examples(),
+            inputs=[creator_id, content, platform, submission_id, title],
         )
 
     with gr.Tab("Appeal"):
