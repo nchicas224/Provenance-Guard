@@ -293,7 +293,7 @@ class AuditLogger:
             return True
         except sqlite3.Error:
             return False
-
+        
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
