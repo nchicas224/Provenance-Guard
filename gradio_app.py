@@ -46,7 +46,8 @@ def submit_text(creator_id, content, platform, submission_id, title):
     payload["metadata"] = {
         key: value for key, value in payload["metadata"].items() if value
     }
-    return _post_json("/api/v1/submit", payload)
+    response_json = _post_json("/api/v1/submit", payload)
+    return _format_submit_label(response_json), response_json
 
 
 def submit_appeal(audit_id, creator_id, reason, email):
@@ -61,6 +62,44 @@ def submit_appeal(audit_id, creator_id, reason, email):
 
 def check_health():
     return _get_json("/api/v1/health")
+
+
+def _format_submit_label(response_json):
+    if not isinstance(response_json, dict):
+        return "The API returned an unexpected response shape."
+
+    error = response_json.get("error")
+    if isinstance(error, dict):
+        code = error.get("code", "unknown_error")
+        message = error.get("message", "The submission could not be analyzed.")
+        return f"Error: {code}\n{message}"
+
+    result = response_json.get("attribution_result", "unknown")
+    confidence_level = response_json.get("confidence_level", "unknown")
+    ai_likelihood = response_json.get("ai_likelihood")
+    confidence_score = response_json.get("confidence_score")
+    degraded = response_json.get("degraded", False)
+    audit_id = response_json.get("audit_id", "not available")
+    transparency_label = response_json.get("transparency_label", "")
+
+    ai_likelihood_text = _format_score(ai_likelihood)
+    confidence_score_text = _format_score(confidence_score)
+    degraded_text = "Yes" if degraded else "No"
+
+    return (
+        f"Result: {result}\n"
+        f"Confidence: {confidence_level} ({confidence_score_text})\n"
+        f"AI likelihood: {ai_likelihood_text}\n"
+        f"Degraded analysis: {degraded_text}\n"
+        f"Audit ID: {audit_id}\n\n"
+        f"{transparency_label}"
+    )
+
+
+def _format_score(value):
+    if isinstance(value, int | float):
+        return f"{value:.4f}"
+    return "not available"
 
 
 def _post_json(path, payload):
@@ -112,11 +151,16 @@ with gr.Blocks(title="Provenance Guard") as demo:
             submission_id = gr.Textbox(label="Submission ID")
             title = gr.Textbox(label="Title")
         submit_button = gr.Button("Analyze")
+        submit_label = gr.Textbox(
+            label="User-facing label",
+            lines=8,
+            interactive=False,
+        )
         submit_output = gr.JSON(label="API response")
         submit_button.click(
             submit_text,
             inputs=[creator_id, content, platform, submission_id, title],
-            outputs=submit_output,
+            outputs=[submit_label, submit_output],
         )
         gr.Examples(
             examples=load_evaluation_examples(),
