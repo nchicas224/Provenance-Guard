@@ -19,6 +19,7 @@ from provenance_guard.services.submit_service import SubmitService
 from provenance_guard.signals.groq_signal_service import GroqSignalService
 from provenance_guard.signals.stylometric_signal_service import StylometricSignalService
 
+from dotenv import load_dotenv
 
 def create_app(database_path="provenance_guard.db"):
     app = Flask(__name__)

@@ -43,6 +43,14 @@ Run the app:
 python run.py
 ```
 
+Run the optional Gradio evaluation UI in a second terminal:
+
+```powershell
+python gradio_app.py
+```
+
+By default, the Gradio UI calls the Flask API at `http://127.0.0.1:5000`. To use a different API URL, set `PROVENANCE_API_BASE_URL`.
+
 Run tests:
 
 ```powershell
