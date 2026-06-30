@@ -98,7 +98,7 @@ class TextPipeline:
             audit_context.caution_flags.append("short_text")
 
     def _log_signal_failure(self, audit_context, signal):
-        event_type = f"{signal.name}_failed"
+        event_type = self._signal_failure_event_type(signal)
         self.audit_logger.log_system_event(
             SystemEventRecord(
                 event_id=self._new_id("event"),
@@ -112,6 +112,11 @@ class TextPipeline:
                 created_at=self._now(),
             )
         )
+
+    def _signal_failure_event_type(self, signal):
+        if signal.error and ":" in signal.error:
+            return signal.error.split(":", 1)[0]
+        return f"{signal.name}_failed"
 
     def _now(self):
         return datetime.now(UTC).isoformat()

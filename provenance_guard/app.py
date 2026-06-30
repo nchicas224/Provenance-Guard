@@ -3,6 +3,7 @@
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from dotenv import load_dotenv
 
 from provenance_guard import config
 from provenance_guard.pipelines.text_pipeline import TextPipeline
@@ -22,6 +23,7 @@ from provenance_guard.signals.stylometric_signal_service import StylometricSigna
 from dotenv import load_dotenv
 
 def create_app(database_path="provenance_guard.db"):
+    load_dotenv()
     app = Flask(__name__)
 
     audit_logger = AuditLogger(database_path)
